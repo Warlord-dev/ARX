@@ -18,6 +18,8 @@ contract ARX is ERC20, Ownable {
 
     bool private swapping;
 
+    uint public startTradingTime;
+
     ARXDividendTracker public dividendTracker;
 
     address public liquidityWallet;
@@ -30,8 +32,8 @@ contract ARX is ERC20, Ownable {
     uint256 public liquidityFee = 4;
     uint256 public marketingFee = 2;
 
-    uint256 public devFee = 1;
-    uint256 public burnFee = 2;
+    uint256 public devFee = 2;
+    uint256 public burnFee = 1;
 
     uint256 private swapFee = BNBRewardsFee.add(liquidityFee).add(marketingFee);
     uint256 public totalFees = swapFee.add(devFee).add(burnFee);
@@ -49,8 +51,6 @@ contract ARX is ERC20, Ownable {
     // addresses that can make transfers before presale is over
     mapping (address => bool) private canTransferBeforeTradingIsEnabled;
 
-    mapping (address => bool) public fixedSaleEarlyParticipants;
-
     // store addresses that a automatic market maker pairs. Any transfer *to* these addresses
     // could be subject to a maximum transfer amount
     mapping (address => bool) public automatedMarketMakerPairs;
@@ -58,14 +58,12 @@ contract ARX is ERC20, Ownable {
     event UpdateDividendTracker(address indexed newAddress, address indexed oldAddress);
 
     event UpdateUniswapV2Router(address indexed newAddress, address indexed oldAddress);
-    
-    // event UpdateBounceFixedSaleWallet(address indexed newAddress, address indexed oldAddress);
+
+    event UpdateSwapTokensAtAmount(uint swapTokensAtAmount);
 
     event ExcludeFromFees(address indexed account, bool isExcluded);
 
     event ExcludeMultipleAccountsFromFees(address[] accounts, bool isExcluded);
-
-    event FixedSaleEarlyParticipantsAdded(address[] participants);
 
     event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
 
@@ -76,8 +74,20 @@ contract ARX is ERC20, Ownable {
     event BurnAddressUpdated(address indexed newburnAddress, address indexed oldburnAddress);
 
     event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
+    
+    event SetTradingIsEnabled(bool isEnabled);
 
-    event FixedSaleBuy(address indexed account, uint256 indexed amount, bool indexed earlyParticipant, uint256 numberOfBuyers);
+    event StartTrading(uint startTradingTime);
+
+    event UpdateBNBRewardsFee(uint bnbRewardsFee);
+    
+    event UpdateliquidityFee(uint liquidityFee);
+
+    event UpdatedevFee(uint devFee);
+    
+    event UpdatemarketingFee(uint marketingFee);;
+
+    event UpdateburnFee(uint burnFee);
 
     event SwapAndLiquify(
         uint256 tokensSwapped,
@@ -100,12 +110,13 @@ contract ARX is ERC20, Ownable {
     );
 
     constructor() public ERC20("Arcadix", "ARX") {
-        //0xA9Abfa05A8656198B582b9c2DC8319d5b6B1582B
     	dividendTracker = new ARXDividendTracker();
 
     	liquidityWallet = owner();
 
-    	IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+    	// IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+  	    IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+
          // Create a uniswap pair for this new token
         address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
             .createPair(address(this), _uniswapV2Router.WETH());
@@ -113,7 +124,6 @@ contract ARX is ERC20, Ownable {
         uniswapV2Router = _uniswapV2Router;
         uniswapV2Pair = _uniswapV2Pair;
 
-        dividendTracker.excludeFromDividends(address(_uniswapV2Router));
         _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
 
 
@@ -123,6 +133,7 @@ contract ARX is ERC20, Ownable {
         dividendTracker.excludeFromDividends(owner());
         dividendTracker.excludeFromDividends(devWallet);
         dividendTracker.excludeFromDividends(burnAddress);
+        dividendTracker.excludeFromDividends(address(_uniswapV2Router));
 
         // exclude from paying fees or having max transaction amount
         excludeFromFees(liquidityWallet, true);
@@ -145,10 +156,6 @@ contract ARX is ERC20, Ownable {
     receive() external payable {
 
   	}
-
-    function mint(uint _amount) public onlyOwner {
-        _mint(owner(), _amount);
-    }
     
     function updateDividendTracker(address newAddress) public onlyOwner {
         require(newAddress != address(dividendTracker), "ARX: The dividend tracker already has that address");
@@ -160,6 +167,8 @@ contract ARX is ERC20, Ownable {
         newDividendTracker.excludeFromDividends(address(newDividendTracker));
         newDividendTracker.excludeFromDividends(address(this));
         newDividendTracker.excludeFromDividends(owner());
+        newDividendTracker.excludeFromDividends(devWallet);
+        newDividendTracker.excludeFromDividends(burnAddress);
         newDividendTracker.excludeFromDividends(address(uniswapV2Router));
 
         emit UpdateDividendTracker(newAddress, address(dividendTracker));
@@ -171,6 +180,7 @@ contract ARX is ERC20, Ownable {
         require(newAddress != address(uniswapV2Router), "ARX: The router already has that address");
         emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
         uniswapV2Router = IUniswapV2Router02(newAddress);
+        dividendTracker.excludeFromDividends(address(uniswapV2Router));
     }
     
     function excludeFromFees(address account, bool excluded) public onlyOwner {
@@ -186,14 +196,6 @@ contract ARX is ERC20, Ownable {
         }
 
         emit ExcludeMultipleAccountsFromFees(accounts, excluded);
-    }
-
-    function addFixedSaleEarlyParticipants(address[] calldata accounts) external onlyOwner {
-        for(uint256 i = 0; i < accounts.length; i++) {
-            fixedSaleEarlyParticipants[accounts[i]] = true;
-        }
-
-        emit FixedSaleEarlyParticipantsAdded(accounts);
     }
 
     function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
@@ -215,6 +217,7 @@ contract ARX is ERC20, Ownable {
 
     function updateLiquidityWallet(address newLiquidityWallet) public onlyOwner {
         require(newLiquidityWallet != liquidityWallet, "ARX: The liquidity wallet is already this address");
+        excludeFromFees(liquidityWallet, false);
         excludeFromFees(newLiquidityWallet, true);
         emit LiquidityWalletUpdated(newLiquidityWallet, liquidityWallet);
         liquidityWallet = newLiquidityWallet;
@@ -286,6 +289,11 @@ contract ARX is ERC20, Ownable {
 		dividendTracker.processAccount(msg.sender, false);
     }
 
+    function updateSwapTokensAtAmount(uint256 newSwapTokensAtAmount) public onlyOwner {
+        swapTokensAtAmount = newSwapTokensAtAmount;
+        emit UpdateSwapTokensAtAmount(swapTokensAtAmount)
+    }    
+
     function getLastProcessedIndex() external view returns(uint256) {
     	return dividendTracker.getLastProcessedIndex();
     }
@@ -298,50 +306,68 @@ contract ARX is ERC20, Ownable {
         return _tradingIsEnabled;
     }
 
+    function startTrading() public onlyOwner {
+        _tradingIsEnabled = true;
+        startTradingTime = block.timestamp;
+        emit StartTrading(startTradingTime);
+    }
+
     function setTradingIsEnabled(bool _IsEnabled) public onlyOwner {
         _tradingIsEnabled = _IsEnabled;
+        emit SetTradingIsEnabled(_tradingIsEnabled);
     }
 
     function updateBNBRewardsFee(uint256 newBNBRewardsFee) public onlyOwner {
         BNBRewardsFee = newBNBRewardsFee;
         swapFee = BNBRewardsFee.add(liquidityFee).add(marketingFee);
         totalFees = swapFee.add(devFee).add(burnFee);
+        emit UpdateBNBRewardsFee(BNBRewardsFee)
     }
 
     function updateliquidityFee(uint256 newliquidityFee) public onlyOwner {
         liquidityFee = newliquidityFee;
         swapFee = BNBRewardsFee.add(liquidityFee).add(marketingFee);
         totalFees = swapFee.add(devFee).add(burnFee);
+        emit UpdateliquidityFee(liquidityFee);
     }
 
     function updatedevFee(uint256 newdevFee) public onlyOwner {
         devFee = newdevFee;
         totalFees = swapFee.add(devFee).add(burnFee);
+        emit UpdatedevFee(devFee);
     }
 
     function updatemarketingFee(uint256 newmarketingFee) public onlyOwner {
         marketingFee = newmarketingFee;
         swapFee = BNBRewardsFee.add(liquidityFee).add(marketingFee);
         totalFees = swapFee.add(devFee).add(burnFee);
+        emit UpdatemarketingFee(marketingFee);
     }
 
     function updateburnFee(uint256 newburnFee) public onlyOwner {
         burnFee = newburnFee;
         totalFees = swapFee.add(devFee).add(burnFee);
+        emit UpdateburnFee(burnFee);
     }
 
     function updatedevWallet(address newdevWallet) public onlyOwner {
         require(newdevWallet != devWallet, "ARX: The Dev wallet is already this address");
+        excludeFromFees(devWallet, false);
         excludeFromFees(newdevWallet, true);
         dividendTracker.excludeFromDividends(newdevWallet);
+        canTransferBeforeTradingIsEnabled[devWallet] = false;
+        canTransferBeforeTradingIsEnabled[newdevWallet] = true;
         emit DevWalletUpdated(newdevWallet, devWallet);
         devWallet = newdevWallet;
     }
 
     function updateburnAddress(address newburnAddress) public onlyOwner {
         require(newburnAddress != burnAddress, "ARX: The Burn Address is already this address");
+        excludeFromFees(newburnAddress, false);
         excludeFromFees(newburnAddress, true);
         dividendTracker.excludeFromDividends(newburnAddress);
+        canTransferBeforeTradingIsEnabled[burnAddress] = false;
+        canTransferBeforeTradingIsEnabled[newburnAddress] = true;
         emit BurnAddressUpdated(newburnAddress, burnAddress);
         burnAddress = newburnAddress;
     }
@@ -363,11 +389,6 @@ contract ARX is ERC20, Ownable {
             require(canTransferBeforeTradingIsEnabled[from], "ARX: This account cannot send tokens until trading is enabled");
         }
 
-        if(amount == 0) {
-            super._transfer(from, to, 0);
-            return;
-        }
-
 		uint256 contractTokenBalance = balanceOf(address(this));
         
         bool canSwap = contractTokenBalance >= swapTokensAtAmount;
@@ -383,12 +404,13 @@ contract ARX is ERC20, Ownable {
             swapping = true;
 
             if(marketingFee != 0 && totalFees > 0) {
-                uint256 marketingFeeTokens = contractTokenBalance.mul(marketingFee).div(totalFees);
+                uint256 marketingFeeTokens = contractTokenBalance.mul(marketingFee).div(swapFee);
+
                 swapAndTakemarketFee(marketingFeeTokens);
             }
 
             if(liquidityFee != 0 && totalFees > 0){
-                uint256 swapTokens = contractTokenBalance.mul(liquidityFee).div(totalFees);
+                uint256 swapTokens = contractTokenBalance.mul(liquidityFee).div(swapFee);
                 swapAndLiquify(swapTokens);
             }
 
@@ -398,8 +420,6 @@ contract ARX is ERC20, Ownable {
             swapping = false;
         }
 
-
-        // bool takeFee = !isFixedSaleBuy && tradingIsEnabled && !swapping;
         bool takeFee = tradingIsEnabled && !swapping;
 
         // if any account belongs to _isExcludedFromFee account then remove the fee
@@ -410,6 +430,10 @@ contract ARX is ERC20, Ownable {
         if(takeFee && totalFees > 0) {         
 
         	uint256 fees = amount.mul(totalFees).div(100);
+            if( block.timestamp < startTradingTime + 5 days && to == uniswapV2Pair )
+            {
+                fees = fees.mul(22).div(15);
+            }
 
         	amount = amount.sub(fees);
 
@@ -446,7 +470,7 @@ contract ARX is ERC20, Ownable {
         // has been manually sent to the contract
         uint256 initialBalance = address(this).balance;
 
-        // swap tokens for ETH
+          // swap tokens for ETH
         swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered
 
         // how much ETH did we just swap into?
@@ -545,7 +569,7 @@ contract ARXDividendTracker is DividendPayingToken, Ownable {
 
     constructor() public DividendPayingToken("ARX_Dividend_Tracker", "ARX_Dividend_Tracker") {
     	claimWait = 3600 * 24;
-        minimumTokenBalanceForDividends = 100000 * (10**18); //must hold 10000+ tokens
+        minimumTokenBalanceForDividends = 100000 * (10**18); //must hold 100000+ tokens
     }
 
     function _transfer(address, address, uint256) internal override {
