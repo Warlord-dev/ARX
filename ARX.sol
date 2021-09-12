@@ -85,7 +85,7 @@ contract ARX is ERC20, Ownable {
 
     event UpdatedevFee(uint devFee);
     
-    event UpdatemarketingFee(uint marketingFee);;
+    event UpdatemarketingFee(uint marketingFee);
 
     event UpdateburnFee(uint burnFee);
 
