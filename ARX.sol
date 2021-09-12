@@ -291,7 +291,7 @@ contract ARX is ERC20, Ownable {
 
     function updateSwapTokensAtAmount(uint256 newSwapTokensAtAmount) public onlyOwner {
         swapTokensAtAmount = newSwapTokensAtAmount;
-        emit UpdateSwapTokensAtAmount(swapTokensAtAmount)
+        emit UpdateSwapTokensAtAmount(swapTokensAtAmount);
     }    
 
     function getLastProcessedIndex() external view returns(uint256) {
@@ -321,7 +321,7 @@ contract ARX is ERC20, Ownable {
         BNBRewardsFee = newBNBRewardsFee;
         swapFee = BNBRewardsFee.add(liquidityFee).add(marketingFee);
         totalFees = swapFee.add(devFee).add(burnFee);
-        emit UpdateBNBRewardsFee(BNBRewardsFee)
+        emit UpdateBNBRewardsFee(BNBRewardsFee);
     }
 
     function updateliquidityFee(uint256 newliquidityFee) public onlyOwner {
